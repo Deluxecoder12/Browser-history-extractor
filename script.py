@@ -40,7 +40,7 @@ def locate_browser_files(img, browsers=None):
         if browser in browsers:
             print(f"Searching for {browser} database files...")
             try:
-                if img:
+                if img: # FIXEM: Add a traversal function
                     print(f"Found {browser} database file: {path}")
                 else:
                     print(f"{browser} database file not found.")
