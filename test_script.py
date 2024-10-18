@@ -1,5 +1,4 @@
 import pytest
-import ctypes
 import os
 from script import open_disk_image  #script.py
 

@@ -22,6 +22,34 @@ def open_disk_image(image_path):
         print(f"Error opening disk image or drive: {e}")
         return None
 
+# Function to locate Browser History
+def locate_browser_files(img, browsers=None):
+    # If not user-defined, select all three by default
+    if browsers is None:
+        browsers = ["Chrome", "Edge", "Firefox"]
+
+    # Defining Paths for Each Browser's History
+    browser_paths = {
+        "Chrome": "Users/*/AppData/Local/Google/Chrome/User Data/Default/History",
+        "Edge": "Users/*/AppData/Local/Microsoft/Edge/User Data/Default/History",
+        "Firefox": "Users/*/AppData/Roaming/Mozilla/Firefox/Profiles/*/places.sqlite"
+    }
+
+    # Search For Browser's database file
+    for browser, path in browser_paths.items():
+        if browser in browsers:
+            print(f"Searching for {browser} database files...")
+            try:
+                if img:
+                    print(f"Found {browser} database file: {path}")
+                else:
+                    print(f"{browser} database file not found.")
+            except Exception as e:
+                print(f"Error while searching for {browser} database files: {e}")
+                return False
+
+    return True
+
 if __name__ == "__main__":
     disk_image_path = "D:/PC-MUS-001.E01"   # Dummy path for a .E01 file
     # disk_image_path = r'\\.\E:'   # Dummy path for a E:/ drive
@@ -29,6 +57,8 @@ if __name__ == "__main__":
 
     if disk_image:
         print("Disk loaded and ready for further processing.")
+        browser_files = locate_browser_files(disk_image)
+        print(f"Browser database files located: {browser_files}")
     else:
         print("Failed to load the disk image. Please ensure the path is correct.")
 
