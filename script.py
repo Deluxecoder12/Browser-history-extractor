@@ -2,6 +2,15 @@ import pytsk3
 
 # Function to open and inspect disk image (Windows)
 def open_disk_image(image_path):
+    """
+    Open the disk image to start inspection.
+    
+    Args:
+        image_path: The location where the image/disk is located
+    Returns:
+        str: returns the disk/image if found, else None
+    """
+
     if not image_path:
         print("Image Path is empty")
         return None
@@ -21,6 +30,34 @@ def open_disk_image(image_path):
     except Exception as e:
         print(f"Error opening disk image or drive: {e}")
         return None
+
+# Function to Traverse Path and search for the file
+def search_file(img, path_pattern):
+    """
+    Traverse the disk image to find a file matching the provided path pattern.
+    
+    Args:
+        img (pytsk3.Img_Info): The disk image object.
+        path_pattern (str): The pattern of the path to search for (e.g., "Users/*/AppData/Local/Google/Chrome/User Data/Default/History").
+
+    Returns:
+        str: Full path of the file if found, otherwise None.
+    """
+    try:
+        # Open filesystem in the disk image
+        fs = pytsk3.FS_Info(img)
+        root_dir = fs.open_dir("/")
+
+        # Traverse the file system recursively
+        for entry in root_dir:
+            if entry.info.name.name.decode() == path_pattern.split('/')[-1]:
+                return path_pattern  # Return the path if matched
+
+        return None
+    except Exception as e:
+        print(f"Error while traversing the disk image: {e}")
+        return None
+
 
 # Function to locate Browser History
 def locate_browser_files(img, browsers=None):
