@@ -216,7 +216,7 @@ def export_history(history_data, output_dir):
             writer.writerow(entry)
     print(f"\nExported CSV to: {csv_path}")
     
-    # Export to JSON
+    # Export to JSON 
     json_path = os.path.join(output_dir, f'browser_history_{timestamp}.json')
     with open(json_path, 'w', encoding='utf-8') as jsonfile:
         json.dump(history_data, jsonfile, indent=4)
