@@ -1,4 +1,4 @@
-import pytsk3
+import pytsk3 # 
 import pyewf
 import os
 import sqlite3
@@ -13,7 +13,7 @@ class EwfImgInfo(pytsk3.Img_Info):
     def __init__(self, ewf_handle):
         # Initialize the EWF image info object.
         self._ewf_handle = ewf_handle
-        super(EwfImgInfo, self).__init__(url="", type=pytsk3.TSK_IMG_TYPE_EXTERNAL)
+        super(EwfImgInfo, self).__init__(url="", type=pytsk3.TSK_IMG_TYPE_EXTERNAL) # TSK_IMG_TYPE_EXTERNAL because it's a EWF file and not a traditional disk image.
 
     def close(self):
         # Close the EWF handle.
@@ -112,6 +112,7 @@ def extract_and_analyze_history(fs_file, browser_type):
         
         history_entries = []
         print(f"\n{browser_type} History:")
+        
         # Process and format each history entry.
         for url, title, timestamp in results[:10]:
             if browser_type in ['Chrome', 'Edge']:
@@ -238,7 +239,7 @@ def main():
         # Open the disk image
         print(f"Opening disk image: {image_path}")
         ewf_handle = pyewf.handle()
-        ewf_handle.open(pyewf.glob(image_path))
+        ewf_handle.open([image_path])
         img_info = EwfImgInfo(ewf_handle)
         
         # Get the filesystem
