@@ -1,4 +1,5 @@
 import pytsk3
+import os
 
 # Function to open and inspect disk image (Windows)
 def open_disk_image(image_path):
@@ -43,20 +44,8 @@ def search_file(img, path_pattern):
     Returns:
         str: Full path of the file if found, otherwise None.
     """
-    try:
-        # Open filesystem in the disk image
-        fs = pytsk3.FS_Info(img)
-        root_dir = fs.open_dir("/")
-
-        # Traverse the file system recursively
-        for entry in root_dir:
-            if entry.info.name.name.decode() == path_pattern.split('/')[-1]:
-                return path_pattern  # Return the path if matched
-
-        return None
-    except Exception as e:
-        print(f"Error while traversing the disk image: {e}")
-        return None
+    print("search_file() function invoked")
+    return None
 
 
 # Function to locate Browser History
@@ -77,7 +66,8 @@ def locate_browser_files(img, browsers=None):
         if browser in browsers:
             print(f"Searching for {browser} database files...")
             try:
-                if img: # FIXME: Add a traversal function
+                file_path = search_file(img, path)
+                if file_path:
                     print(f"Found {browser} database file: {path}")
                 else:
                     print(f"{browser} database file not found.")
