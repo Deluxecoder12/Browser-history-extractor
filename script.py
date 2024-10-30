@@ -11,32 +11,48 @@ import json
 
 class EwfImgInfo(pytsk3.Img_Info):
     def __init__(self, ewf_handle):
+        # Initialize the EWF image info object.
         self._ewf_handle = ewf_handle
         super(EwfImgInfo, self).__init__(url="", type=pytsk3.TSK_IMG_TYPE_EXTERNAL)
 
     def close(self):
+        # Close the EWF handle.
         self._ewf_handle.close()
 
     def read(self, offset, size):
+        # Read a specific amount of data from the EWF image.
         self._ewf_handle.seek(offset)
         return self._ewf_handle.read(size)
 
     def get_size(self):
+        # Return the size of the EWF image.
         return self._ewf_handle.get_media_size()
 
 def find_browser_files(fs_info, username):
     """
-    Search for browser history files for a specific user
+    Search for browser history files for a specific user.
+
+    Args:
+        fs_info: Filesystem information object.
+        username: The username whose browser files are to be searched.
+
+    Returns:
+        dict: Found browser files with browser names as keys and file objects as values.
     """
+
     found_files = {}
+    
+    # Define paths for each browser's history file.
     browser_paths = {
         'Chrome': f"/Users/{username}/AppData/Local/Google/Chrome/User Data/Default/History",
         'Edge': f"/Users/{username}/AppData/Local/Microsoft/Edge/User Data/Default/History",
         'Firefox': f"/Users/{username}/AppData/Roaming/Mozilla/Firefox/Profiles"
     }
     
+    # Iterate through each browser and search for its history file.
     for browser, base_path in browser_paths.items():
         try:
+            # Handle Firefox profiles separately due to varying profile names.
             if browser == 'Firefox':
                 try:
                     profiles_dir = fs_info.open_dir(base_path)
@@ -54,6 +70,7 @@ def find_browser_files(fs_info, username):
                 except:
                     pass
             else:
+                # General case for Chrome and Edge.
                 try:
                     file = fs_info.open(base_path)
                     found_files[browser] = file
@@ -68,23 +85,34 @@ def find_browser_files(fs_info, username):
 
 def extract_and_analyze_history(fs_file, browser_type):
     """
-    Extract and analyze browser history from a filesystem file
+    Extract and analyze browser history from a filesystem file.
+
+    Args:
+        fs_file: The filesystem file object for the browser history.
+        browser_type: The type of browser (e.g., Chrome, Firefox).
+
+    Returns:
+        list: A list of history entries containing URLs, titles, and timestamps.
     """
+    
     temp_file = None
     try:
-        temp_dir = tempfile.mkdtemp()
+        temp_dir = tempfile.mkdtemp() # Create a temporary directory.
         temp_file = os.path.join(temp_dir, "temp_db")
         
+        # Write the history file to a temporary location.
         with open(temp_file, 'wb') as outfile:
             outfile.write(fs_file.read_random(0, fs_file.info.meta.size))
         
+        # Extract history based on browser type.
         if browser_type in ['Chrome', 'Edge']:
-            results = extract_chrome_history(temp_file)
+            results = extract_chromium_history(temp_file)
         else:
             results = extract_firefox_history(temp_file)
         
         history_entries = []
         print(f"\n{browser_type} History:")
+        # Process and format each history entry.
         for url, title, timestamp in results[:10]:
             if browser_type in ['Chrome', 'Edge']:
                 timestamp = datetime.fromtimestamp((timestamp/1000000)-11644473600)
@@ -97,6 +125,7 @@ def extract_and_analyze_history(fs_file, browser_type):
                 'title': title,
                 'timestamp': timestamp.strftime('%Y-%m-%d %H:%M:%S')
             }
+            # Print the formatted history entry.
             history_entries.append(entry)
             
             print(f"URL: {url}")
@@ -110,14 +139,21 @@ def extract_and_analyze_history(fs_file, browser_type):
         print(f"Error processing {browser_type} history: {str(e)}")
         return []
     finally:
+        # Clean up temporary files.
         if temp_file and os.path.exists(temp_file):
             os.remove(temp_file)
             if os.path.exists(os.path.dirname(temp_file)):
                 shutil.rmtree(os.path.dirname(temp_file))
 
-def extract_chrome_history(db_path):
+def extract_chromium_history(db_path):
     """
-    Extract URLs from Chrome/Edge history
+    Extract URLs from Chrome/Edge history.
+
+    Args:
+        db_path: The path to the database file.
+
+    Returns:
+        list: A list of tuples containing URLs, titles, and last visit times.
     """
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
@@ -135,7 +171,13 @@ def extract_chrome_history(db_path):
 
 def extract_firefox_history(db_path):
     """
-    Extract URLs from Firefox history
+    Extract URLs from Firefox history.
+
+    Args:
+        db_path: The path to the database file.
+
+    Returns:
+        list: A list of tuples containing URLs, titles, and last visit dates.
     """
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
@@ -154,9 +196,13 @@ def extract_firefox_history(db_path):
 
 def export_history(history_data, output_dir):
     """
-    Export browser history to CSV and JSON formats
+    Export browser history to CSV and JSON formats.
+
+    Args:
+        history_data: The collected browser history data.
+        output_dir: The directory where exports will be saved.
     """
-    os.makedirs(output_dir, exist_ok=True)
+    os.makedirs(output_dir, exist_ok=True) # Create the output directory
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     
     # Export to CSV
@@ -176,6 +222,10 @@ def export_history(history_data, output_dir):
     print(f"Exported JSON to: {json_path}")
 
 def main():
+    """
+    Main function to execute the script.
+    Handles command line input for the E01 image path and orchestrates the workflow.
+    """
     if len(sys.argv) > 1:
         image_path = sys.argv[1]
     else:
