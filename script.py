@@ -1,4 +1,4 @@
-import pytsk3 # 
+import pytsk3 
 import pyewf
 import os
 import sqlite3
@@ -114,7 +114,7 @@ def extract_and_analyze_history(fs_file, browser_type):
         print(f"\n{browser_type} History:")
         
         # Process and format each history entry.
-        for url, title, timestamp in results[:10]:
+        for url, title, timestamp in results:
             if browser_type in ['Chrome', 'Edge']:
                 timestamp = datetime.fromtimestamp((timestamp/1000000)-11644473600)
             else:
@@ -204,10 +204,9 @@ def export_history(history_data, output_dir):
         output_dir: The directory where exports will be saved.
     """
     os.makedirs(output_dir, exist_ok=True) # Create the output directory
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     
     # Export to CSV
-    csv_path = os.path.join(output_dir, f'browser_history_{timestamp}.csv')
+    csv_path = os.path.join(output_dir, f'browser_history.csv')
     with open(csv_path, 'w', newline='', encoding='utf-8') as csvfile:
         fieldnames = ['browser', 'timestamp', 'url', 'title']
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
@@ -217,7 +216,7 @@ def export_history(history_data, output_dir):
     print(f"\nExported CSV to: {csv_path}")
     
     # Export to JSON 
-    json_path = os.path.join(output_dir, f'browser_history_{timestamp}.json')
+    json_path = os.path.join(output_dir, f'browser_history.json')
     with open(json_path, 'w', encoding='utf-8') as jsonfile:
         json.dump(history_data, jsonfile, indent=4)
     print(f"Exported JSON to: {json_path}")
