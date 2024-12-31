@@ -1,6 +1,6 @@
 import pytest
 import os
-from script import open_disk_image  #script.py
+import script
 
 def test_open_non_image_file():
     non_image_file = 'D:/example.txt'  # Path to a non-image file
