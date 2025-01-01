@@ -56,9 +56,9 @@ The script provides an interactive menu to select which browser's history to ext
 
 ### Partition Selection
 
-Automatic Windows partition detection
-Manual offset input option
-Common preset offsets:
+1. Automatic Windows partition detection
+2. Manual offset input option
+3. Common preset offsets:
 - 0 bytes
 - 1048576 bytes (512 * 2048)
 - 65536 bytes (512 * 128)
@@ -67,48 +67,48 @@ Common preset offsets:
 ## Output
 The script creates a browser_history_exports directory containing:
 
-### browser_history_exports/: Contains extracted history
+### browser_history_exports/:
+##### Contains extracted history
 
 [image_name]_browser_history.csv
 [image_name]_browser_history.json
 
-
-### logs/: Contains detailed error logs
+### logs/:
+##### Contains detailed error logs
 
 [image_name]_[timestamp]_errors.log
 
 ### History Entry Format
 Each entry contains:
 
-Browser name
-Profile name
-Timestamp
-URL
-Page title
+- Browser name
+- Profile name
+- Timestamp
+- URL
+- Page title
 
 ## Testing
 Tested successfully with Python 3.6+ on:
-Windows 10/11
-E01 images from CTF challenges
-Multiple user profiles
-Different partition layouts
+1. Windows 10/11
+2. E01 images from CTF challenges
+3. Multiple user profiles
+4. Different partition layouts
 
 ## Error Handling
-
-Comprehensive error logging
-Debug information for failed operations
-Detailed partition information logging
-Browser installation verification
-Profile access error tracking
+- Comprehensive error logging
+- Debug information for failed operations
+- Detailed partition information logging
+- Browser installation verification
+- Profile access error tracking
 
 ## Future Improvements
 
-Add support for more browsers (Safari, Opera, Brave)
-Add timeline visualization
-Add support for browser cache and cookies
-Add multi-threading for faster processing
-Add support for more image formats (AFF)
-Add GUI interface
+- Add support for more browsers (Safari, Opera, Brave)
+- Add timeline visualization
+- Add support for browser cache and cookies
+- Add multi-threading for faster processing
+- Add support for more image formats (AFF)
+- Add GUI interface
 
 ## License
 This project is licensed under Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
