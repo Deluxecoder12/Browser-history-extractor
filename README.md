@@ -22,6 +22,16 @@ A Python-based forensic tool for extracting browser history from EWF (E01) disk 
 pip install pytsk3 pyewf
 ```
 
+## Important Notes About EWF Files
+This tool handles both single EWF files (.E01) and split EWF files (.E01, .E02, etc.):
+- Single files: Standard E01 forensic images
+- Split files: Large images split into multiple segments (E01-E0x)
+
+When using split images:
+- Always specify the .E01 file
+- All segments must be in the same directory
+- Segments must follow naming convention (basename.E01, basename.E02, etc.)
+
 ## Installation
 ```bash
 git clone https://github.com/Deluxecoder12/Browser-history-extractor.git
@@ -117,7 +127,6 @@ NonCommercial — You may not use the material for commercial purposes
 This document outlines the functions used in the Browser History Extraction script that analyzes browser history from EWF disk images.
 
 ## 1. setup_logging(image_name)
-
 ### Purpose: 
 Configure logging for error tracking and debugging.
 
@@ -135,7 +144,6 @@ Configured logging object
 --- 
 
 ## 2. EwfImgInfo Class
-
 ### Purpose
 Handles the interaction with the EWF image, providing methods to read data and retrieve size information.
 
@@ -275,23 +283,55 @@ Export collected browser history to CSV and JSON formats.
 - Provides a flexible mapping for browser choices
 
 
-## 11. open_disk_image():
+## 11. get_ewf_segments(base_path, base_name, logger)
 ### Purpose
-- Encapsulates the process of opening the EWF disk image
-- Handles path normalization and image size logging
+Find all segments belonging to a specific EWF image series.
 
+### Inputs
+- `base_path`: Directory containing the image files
+- `base_name`: Base name of the image (e.g., 'Laptop1Final' from 'Laptop1Final.E01')
+- `logger`: Logging object
 
-## 12. get_filesystem():
+### Process
+- Searches for sequential segments (E01, E02, etc.)
+- Validates segment naming and sequence
+- Logs found segments
+
+### Returns
+Ordered list of segment paths belonging to this image
+
+## 12. open_disk_image(image_path, logger)
+### Purpose
+Open EWF disk image, handling both single and split files.
+
+### Inputs
+- `image_path`: Path to the E01 file
+- `logger`: Logging object
+
+### Process
+- Normalizes path and extracts base name
+- Finds all related segments if split
+- Opens image with all segments
+- Calculates total image size
+
+### Returns
+Tuple containing:
+- ewf_handle: Handle to the opened image
+- img_info: Image information object
+- base_name: Image name without extension
+- image_size: Total size in bytes
+
+## 13. get_filesystem():
 ### Purpose:
 - Manages partition offset detection and filesystem opening
 - Provides clearer error handling
 
-## 13. process_user_profiles():
+## 14. process_user_profiles():
 ### Purpose:
 - Centralizes the logic of searching and processing browser history for all users
 - Maintains the existing error handling and logging
 
-## 14. main
+## 15. main
 ### Purpose
 Main function to execute the script and orchestrate the workflow.
 
@@ -307,15 +347,20 @@ Main function to execute the script and orchestrate the workflow.
 ---
 
 ## Troubleshooting
-Common issues and solutions:
+### Common issues and solutions:
 
 - Path not found: Check case sensitivity
 - Partition detection fails: Try manual offset options
 - Database locked: Check file permissions
 - Memory errors: Consider image size and available RAM
 
-## Contributing
+### EWF-Specific Issues
+- Split image errors: Ensure all segments are present and in sequence
+- Wrong segment specified: Must use .E01 file for split images
+- Multiple image series: Keep different image series in separate directories
+- Segment naming: Follow standard EWF naming convention (basename.E0x)
 
+## Contributing
 1. Fork the repository
 2. Create your feature branch
 3. Commit your changes

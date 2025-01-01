@@ -520,34 +520,82 @@ def parse_browser_selection():
     
     return selected_browser
 
+def get_ewf_segments(base_path, base_name, logger):
+    """
+    Find all segments belonging to a specific EWF image.
+    
+    Args:
+        base_path: Directory containing the image
+        base_name: Base name of the image (e.g., 'Laptop1Final' from 'Laptop1Final.E01')
+        logger: Logger object
+    
+    Returns:
+        list: Ordered list of segment paths belonging to this image
+    """
+    segments = []
+    segment_num = 1
+    
+    while True:
+        # Look for next segment using exact naming
+        segment_path = os.path.join(base_path, f"{base_name}.E{segment_num:02d}")
+        if os.path.exists(segment_path):
+            segments.append(segment_path)
+            logger.info(f"Found segment: {os.path.basename(segment_path)}")
+            segment_num += 1
+        else:
+            break
+    
+    return segments
+
 def open_disk_image(image_path, logger):
     """
-    Open the EWF disk image and return image info.
+    Open the EWF disk image and handle split files (E01, E02, etc.).
 
     Args:
-        image_path (str): Path to the E01 image file
+        image_path (str): Path to any segment of the EWF image
         logger: Logging object
 
     Returns:
         tuple: (ewf_handle, img_info, image_name, image_size)
     """
-    logger.info(f"Opening disk image: {image_path}")
-    
-    # Normalize and get image name
-    image_path = os.path.normpath(image_path)
-    image_name = os.path.splitext(os.path.basename(image_path))[0]
-    
-    # Open EWF handle
-    ewf_handle = pyewf.handle()
-    ewf_handle.open([image_path])
-    img_info = EwfImgInfo(ewf_handle)
-    
-    # Calculate image size
-    image_size = ewf_handle.get_media_size()
-    size_gb = image_size / (1024**3)  # Convert to GB
-    logger.info(f"Image size: {image_size} bytes ({size_gb:.2f} GB)")
-    
-    return ewf_handle, img_info, image_name, image_size
+    try:
+        image_path = os.path.normpath(image_path)
+        base_path = os.path.dirname(image_path)
+        base_name = os.path.splitext(os.path.basename(image_path))[0]
+        
+        # Verify this is an E01 file
+        if not image_path.upper().endswith('.E01'):
+            logger.error("Must specify the .E01 file of the image series")
+            raise ValueError("Invalid file format - must be .E01")
+        
+        # Find all segments for this specific image
+        filenames = get_ewf_segments(base_path, base_name, logger)
+        
+        if not filenames:
+            logger.error(f"No valid EWF segments found for {base_name}")
+            raise ValueError("No valid segments found")
+        
+        # Report what we found
+        if len(filenames) > 1:
+            logger.info(f"Found {len(filenames)} segments for {base_name}")
+        else:
+            logger.info(f"Single segment image: {base_name}")
+        
+        # Open the image with all its segments
+        ewf_handle = pyewf.handle()
+        ewf_handle.open(filenames)
+        img_info = EwfImgInfo(ewf_handle)
+        
+        # Get total image size
+        image_size = ewf_handle.get_media_size()
+        size_gb = image_size / (1024**3)
+        logger.info(f"Total image size: {image_size} bytes ({size_gb:.2f} GB)")
+        
+        return ewf_handle, img_info, base_name, image_size
+        
+    except Exception as e:
+        logger.error(f"Failed to open disk image: {str(e)}")
+        raise
 
 def get_filesystem(img_info, logger):
     """
@@ -631,19 +679,24 @@ def main():
     Handles command line input for the E01 image path and orchestrates the workflow.
     """
     # Get image path from command line or prompt user
-    image_path = sys.argv[1] if len(sys.argv) > 1 else input("Please enter the path to your E01 image file: ")
+    if len(sys.argv) > 1:
+        image_path = sys.argv[1]
+    else:
+        print("Please enter the path to any segment of the EWF image file (E01, E02, etc.).")
+        image_path = input("Image path: ")
     
     # Set up logging
     image_name = os.path.splitext(os.path.basename(image_path))[0]
+    image_name = image_name.rstrip('0123456789')  # Remove segment number
     logger = setup_logging(image_name)
     
-    # Parse browser selection
-    selected_browser = parse_browser_selection()
-    
-    # Set output directory for exports
-    output_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "browser_history_exports")
-    
     try:
+        # Parse browser selection
+        selected_browser = parse_browser_selection()
+    
+        # Set output directory for exports
+        output_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "browser_history_exports")
+        
         # Open disk image
         ewf_handle, img_info, image_name, image_size = open_disk_image(image_path, logger)
         
