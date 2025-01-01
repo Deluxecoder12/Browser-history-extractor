@@ -59,10 +59,10 @@ The script provides an interactive menu to select which browser's history to ext
 1. Automatic Windows partition detection
 2. Manual offset input option
 3. Common preset offsets:
-- 0 bytes
-- 1048576 bytes (512 * 2048)
-- 65536 bytes (512 * 128)
-- 122683392 bytes (512 * 239616)
+  - 0 bytes
+  - 1048576 bytes (512 * 2048)
+  - 65536 bytes (512 * 128)
+  - 122683392 bytes (512 * 239616)
 
 ## Output
 The script creates a browser_history_exports directory containing:
@@ -115,11 +115,13 @@ This project is licensed under Creative Commons Attribution-NonCommercial 4.0 In
 You are free to:
 
 Share — copy and redistribute the material in any medium or format
+
 Adapt — remix, transform, and build upon the material
 
 Under the following terms:
 
 Attribution — You must give appropriate credit
+
 NonCommercial — You may not use the material for commercial purposes
 
 ## Function Documentation
