@@ -652,10 +652,6 @@ def open_disk_image(image_path, logger):
             logger.warning("No embedded hash found. Computing SHA-256 as session baseline.")
             ewf_handle.seek(0)
             image_hash = compute_hash_by_algorithm(ewf_handle, 'sha256', logger)
-        if image_hash is None:
-            logger.warning("Using internal SHA-256 as session baseline.")
-            ewf_handle.seek(0)
-            image_hash = compute_hash_by_algorithm(ewf_handle, 'sha256', logger)
 
         ewf_handle.seek(0)  # Reset before wrapping
         img_info = EwfImgInfo(ewf_handle)
@@ -873,7 +869,7 @@ def main():
         
         # Extract image name (remove extension like .E01, .E02, etc.)
         image_name = os.path.basename(image_path)
-        image_name = re.sub(r'\.E\d+$', '', image_name)
+        image_name = re.sub(r'\.[Ee]\d+$', '', image_name)
         
         # Set up logging
         logger = setup_logging(image_name)
