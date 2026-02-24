@@ -27,7 +27,7 @@ def setup_logging(image_name):
     # Create logs directory if it doesn't exist
     try:
         os.makedirs('logs')
-    except:
+    except FileExistsError:
         print("logs folder already exists")
     # Create log filename with timestamp and image name
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -44,6 +44,105 @@ def setup_logging(image_name):
     )
     
     return logging.getLogger(__name__)
+
+def parse_input_mode():
+    """
+    Ask the user what type of source to analyze.
+
+    Returns:
+        str: 'ewf', 'raw', or 'live'
+    """
+    print("\nSelect input source:")
+    print("1. EWF image (.E01)")
+    print("2. Raw image (.dd / .raw / .img)")
+    print("3. Live system")
+
+    choice = input("\nEnter your choice (1-3): ").strip()
+
+    mode_map = {
+        '1': 'ewf',
+        'ewf': 'ewf',
+        '2': 'raw',
+        'raw': 'raw',
+        'dd': 'raw',
+        '3': 'live',
+        'live': 'live',
+    }
+
+    mode = mode_map.get(choice.lower())
+    if not mode:
+        print("Invalid choice. Defaulting to EWF.")
+        mode = 'ewf'
+
+    return mode
+
+def process_live_system(selected_browser, logger):
+    """
+    Extract browser history directly from the live running system.
+
+    Returns:
+        list: All collected browser history entries
+    """
+    all_history = []
+
+    users_root = os.path.join(os.environ.get('SystemDrive', 'C:'), '\\Users')
+    
+    system_users = {"Default", "Default User", "All Users", "Public"}
+    
+    # Filter to selected browser if specified
+    if selected_browser:
+        selected_browser = selected_browser.capitalize()
+
+    for username in os.listdir(users_root):
+        user_path = os.path.join(users_root, username)
+        if not os.path.isdir(user_path) or username in system_users:
+            continue
+        
+        logger.info(f"Searching browser history for user: {username}")
+        
+        localappdata = os.path.join(user_path, 'AppData', 'Local')
+        appdata      = os.path.join(user_path, 'AppData', 'Roaming')
+        
+        browser_paths = {
+            'Chrome':  os.path.join(localappdata, 'Google', 'Chrome', 'User Data'),
+            'Edge':    os.path.join(localappdata, 'Microsoft', 'Edge', 'User Data'),
+            'Firefox': os.path.join(appdata, 'Mozilla', 'Firefox', 'Profiles'),
+        }
+        
+        if selected_browser:
+            browser_paths = {k: v for k, v in browser_paths.items() if k == selected_browser}
+
+        for browser, base_path in browser_paths.items():
+            if not os.path.exists(base_path):
+                logger.debug(f"{browser} not found at {base_path}")
+                continue
+
+            logger.info(f"Found {browser} at {base_path}")
+
+            try:
+                for profile_name in os.listdir(base_path):
+                    profile_path = os.path.join(base_path, profile_name)
+
+                    # Only process actual profile directories
+                    if not is_valid_profile(browser, profile_name):
+                        continue
+
+                    main_name = get_history_filename(browser)
+                    db_path = os.path.join(profile_path, main_name)
+
+                    if not os.path.exists(db_path):
+                        continue
+
+                    logger.info(f"Found {browser} history in profile {profile_name}")
+                    history_entries = extract_and_analyze_history({'main': db_path}, browser, profile_name)
+                    if history_entries:
+                        logger.info(f"Successfully processed {browser} profile {profile_name}")
+                        all_history.extend(history_entries)
+
+            except Exception as e:
+                logger.error(f"Error processing {browser}: {str(e)}")
+
+    return all_history
 
 def extract_ewf_hashes(filenames, logger):
     """Extract embedded MD5/SHA1 from EWF binary sections."""
@@ -129,6 +228,57 @@ class EwfImgInfo(pytsk3.Img_Info):
     def get_size(self):
         # Return the size of the EWF image.
         return self._ewf_handle.get_media_size()
+
+
+class RawSegmentImgInfo(pytsk3.Img_Info):
+    """
+    Stitches multiple raw segments together so pytsk3 sees one continuous disk.
+    Same pattern as EwfImgInfo but reads from ordered segment files.
+    """
+    def __init__(self, segments):
+        self._segments = segments
+        self._sizes = [os.path.getsize(s) for s in segments]
+        self._total_size = sum(self._sizes)
+        self._handles = [open(s, 'rb') for s in segments]
+        super().__init__(url="", type=pytsk3.TSK_IMG_TYPE_EXTERNAL)
+
+    def close(self):
+        for f in self._handles:
+            f.close()
+
+    def get_size(self):
+        return self._total_size
+
+    def read(self, offset, size):
+        result = b""
+        remaining = size
+
+        # Find which segment offset falls in
+        seg_start = 0
+        for i, seg_size in enumerate(self._sizes):
+            if offset < seg_start + seg_size:
+                # Read from this segment
+                local_offset = offset - seg_start
+                self._handles[i].seek(local_offset)
+                can_read = min(remaining, seg_size - local_offset)
+                result += self._handles[i].read(can_read)
+                remaining -= can_read
+                offset += can_read
+
+                # Continue into next segments if needed
+                for j in range(i + 1, len(self._segments)):
+                    if remaining <= 0:
+                        break
+                    can_read = min(remaining, self._sizes[j])
+                    self._handles[j].seek(0)
+                    result += self._handles[j].read(can_read)
+                    remaining -= can_read
+                    offset += can_read
+                break
+            seg_start += seg_size
+
+        return result
+    
 
 def get_partition_offset(img_info, logger):
     """
@@ -291,26 +441,26 @@ def find_windows_partition(img_info, logger):
             logger.error(f"Error getting detailed partition info: {e2}")
         return None, None
 
+def get_history_filename(browser_type):
+    return "places.sqlite" if browser_type == 'Firefox' else "History"
+
+def is_valid_profile(browser, profile_name):
+    if browser == 'Firefox':
+        return '.' in profile_name
+    return profile_name == 'Default' or profile_name.startswith('Profile ')
+
 def find_browser_files(fs_info, username, logger, selected_browser=None):
     """
-    Search for browser history files for a specific user.
-
-    Args:
-        fs_info: Filesystem information object.
-        username: The username whose browser files are to be searched.
-        logger: Logger object for error tracking
-        selected_browser: Default-None else browser passed as argument
+    Search for browser history files for a specific user in a disk image.
 
     Returns:
-        dict: Found browser files with browser names as keys and file objects as values.
+        dict: {browser: {profile_name: {'main': file, 'wal': file}}}
     """
-
     found_files = {}
     
-    # Define paths for each browser's history file.
     browser_paths = {
         'Chrome': f"Users/{username}/AppData/Local/Google/Chrome/User Data",
-        'Edge': f"Users/{username}/AppData/Local/Microsoft/Edge/User Data",
+        'Edge':   f"Users/{username}/AppData/Local/Microsoft/Edge/User Data",
         'Firefox': f"Users/{username}/AppData/Roaming/Mozilla/Firefox/Profiles"
     }
 
@@ -327,7 +477,6 @@ def find_browser_files(fs_info, username, logger, selected_browser=None):
         logger.warning(f"No supported browsers found for user {username}")
         return found_files
 
-    # If a specific browser was selected, check if it's installed
     if selected_browser:
         selected_browser = selected_browser.capitalize()
         if selected_browser not in installed_browsers:
@@ -335,115 +484,112 @@ def find_browser_files(fs_info, username, logger, selected_browser=None):
             return found_files
         installed_browsers = {selected_browser: installed_browsers[selected_browser]}
     
-    # Iterate through each browser and search for its history file.
     for browser, base_path in installed_browsers.items():
         found_files[browser] = {} 
         try:
             profiles_dir = fs_info.open_dir(base_path)
             for profile in profiles_dir:
-                # profile -> directory, .info->metadata of directory, name->name metadata, name -> name, decode->byte string to utf-8
                 profile_name = profile.info.name.name.decode('utf-8')
                 if profile_name in [".", ".."]:
                     continue
 
-                main_name = "places.sqlite" if browser == 'Firefox' else "History"
+                # Only process actual browser profile directories
+                if not is_valid_profile(browser, profile_name):
+                    continue
+
+                main_name = get_history_filename(browser)
                 history_path = f"{base_path}/{profile_name}/{main_name}"
                 wal_path = f"{history_path}-wal"
             
                 try:
                     file = fs_info.open(history_path)
-                    # Store as a dict so we can hold both files
-                    found_files[browser][profile_name] = {'main': file} # Profile name is the key
+                    found_files[browser][profile_name] = {'main': file}
                     logger.info(f"Found {browser} history in profile {profile_name}")
 
                     try:
                         wal_file = fs_info.open(wal_path)
                         found_files[browser][profile_name]['wal'] = wal_file
-                        logger.info(f"Found {browser} History and WAL for profile {profile_name}")
+                        logger.info(f"Found WAL for {browser} profile {profile_name}")
                     except Exception:
-                        pass # WAL doesn't exist, that's fine
+                        pass
                 except Exception as e:
                     logger.debug(f"Error accessing history in profile {profile_name}: {e}")
             
         except Exception as e:
             logger.error(f"Error accessing {browser} profiles directory: {str(e)}")
-                    
             
     return found_files
 
 def extract_and_analyze_history(files_dict, browser_type, profile_name):
-    """
-    Extract and analyze browser history from a filesystem file.
-
-    Args:
-        files_dict: A dict containing {'main': fs_file, 'wal': fs_file (optional)}
-        browser_type: The type of browser (e.g., Chrome, Firefox).
-        profile_name: The profile name where history was found
-
-    Returns:
-        list: A list of history entries containing URLs, titles, and timestamps.
-    """
-    
-    temp_dir = tempfile.mkdtemp() # Create a temporary directory.
-    history_entries = []
-
+    temp_dir = tempfile.mkdtemp()
     try:
-        # SQLite expects the WAL file to have the exact same name as the main file + "-wal"
-        main_filename = "places.sqlite" if browser_type == 'Firefox' else "History"
+        main_filename = get_history_filename(browser_type)
         temp_main_db = os.path.join(temp_dir, main_filename)
-        temp_wal_db = os.path.join(temp_dir, f"{main_filename}-wal")
-        
-        fs_main = files_dict['main']
-        with open(temp_main_db, 'wb') as outfile:
-            outfile.write(fs_main.read_random(0, fs_main.info.meta.size))
 
-        # Write the WAL file if it exists
-        if 'wal' in files_dict:
-            fs_wal = files_dict['wal']
-            with open(temp_wal_db, 'wb') as outfile:
-                outfile.write(fs_wal.read_random(0, fs_wal.info.meta.size))
-
-        # Analyze using the local path
-        if browser_type in ['Chrome', 'Edge']:
-            results = extract_chromium_history(temp_main_db)
+        # files_dict['main'] can be either a pytsk3 file or a live path string
+        if isinstance(files_dict['main'], str):
+            shutil.copy2(files_dict['main'], temp_main_db)
+            wal_src = files_dict['main'] + "-wal"
+            if os.path.exists(wal_src):
+                shutil.copy2(wal_src, f"{temp_main_db}-wal")
         else:
-            results = extract_firefox_history(temp_main_db)
-        
-        
-        print(f"\n{browser_type} History from profile {profile_name}:")
-        
-        # Process and format each history entry.
-        for url, title, timestamp in results:
-            if browser_type in ['Chrome', 'Edge']:
-                timestamp = datetime.fromtimestamp((timestamp/1000000)-11644473600)
-            else:
-                timestamp = datetime.fromtimestamp(timestamp/1000000)
-            
-            entry = {
-                'browser': browser_type,
-                'profile': profile_name,
-                'url': url,
-                'title': title,
-                'timestamp': timestamp.strftime('%Y-%m-%d %H:%M:%S')
-            }
-            # Print the formatted history entry.
-            history_entries.append(entry)
-            
-            print(f"URL: {url}")
-            print(f"Title: {title}")
-            print(f"Profile: {profile_name}")
-            print(f"Visited: {timestamp}")
-            print("-" * 50)
-            
-        return history_entries
-            
+            fs_main = files_dict['main']
+            with open(temp_main_db, 'wb') as f:
+                f.write(fs_main.read_random(0, fs_main.info.meta.size))
+            if 'wal' in files_dict:
+                fs_wal = files_dict['wal']
+                with open(f"{temp_main_db}-wal", 'wb') as f:
+                    f.write(fs_wal.read_random(0, fs_wal.info.meta.size))
+
+        return parse_history_db(temp_main_db, browser_type, profile_name)
     except Exception as e:
         print(f"Error processing {browser_type} history: {str(e)}")
         return []
     finally:
-        # Clean up temporary files.
-        if os.path.exists(temp_dir):
-            shutil.rmtree(temp_dir)
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+def parse_history_db(db_path, browser_type, profile_name):
+    """
+    Parse a local SQLite history database and return formatted entries.
+    Shared by both image and live modes.
+
+    Returns:
+        list: History entries
+    """
+    history_entries = []
+
+    if browser_type in ['Chrome', 'Edge']:
+        results = extract_chromium_history(db_path)
+    else:
+        results = extract_firefox_history(db_path)
+
+    print(f"\n{browser_type} History from profile {profile_name}:")
+
+    for url, title, timestamp in results:
+        try:
+            if browser_type in ['Chrome', 'Edge']:
+                timestamp = datetime.fromtimestamp((timestamp / 1000000) - 11644473600)
+            else:
+                timestamp = datetime.fromtimestamp(timestamp / 1000000)
+        except (OSError, ValueError, OverflowError):
+            timestamp = datetime(1970, 1, 1)
+
+        entry = {
+            'browser': browser_type,
+            'profile': profile_name,
+            'url': url,
+            'title': title,
+            'timestamp': timestamp.strftime('%Y-%m-%d %H:%M:%S')
+        }
+        history_entries.append(entry)
+
+        print(f"URL: {url}")
+        print(f"Title: {title}")
+        print(f"Profile: {profile_name}")
+        print(f"Visited: {timestamp}")
+        print("-" * 50)
+
+    return history_entries
 
 def extract_chromium_history(db_path):
     """
@@ -606,7 +752,23 @@ def get_ewf_segments(base_path, base_name, logger):
     
     return segments
 
-def open_disk_image(image_path, logger):
+def get_raw_segments(base_path, base_name, logger):
+    """Find all segments of a segmented raw image (.001, .002, etc.)"""
+    segments = []
+    segment_num = 1
+    
+    while True:
+        candidate = os.path.join(base_path, f"{base_name}.{segment_num:03d}")
+        if os.path.exists(candidate):
+            segments.append(candidate)
+            logger.info(f"Found segment: {os.path.basename(candidate)}")
+            segment_num += 1
+        else:
+            break
+    
+    return segments
+
+def open_ewf_image(image_path, logger):
     """
     Open the EWF disk image and handle split files (E01, E02, etc.).
 
@@ -615,7 +777,7 @@ def open_disk_image(image_path, logger):
         logger: Logging object
 
     Returns:
-        tuple: (ewf_handle, img_info, image_name, image_size)
+        tuple: (ewf_handle, img_info, image_name, image_size, image_hash, filenames)
     """
     try:
         image_path = os.path.normpath(image_path)
@@ -664,8 +826,81 @@ def open_disk_image(image_path, logger):
         return ewf_handle, img_info, base_name, image_size, image_hash, filenames
         
     except Exception as e:
-        logger.error(f"Failed to open disk image: {str(e)}")
+        logger.error(f"Failed to open EWF image: {str(e)}")
         raise
+
+def parse_hash_algorithm():
+    """Prompt user to select hash algorithm for raw image verification."""
+    print("\nSelect hash algorithm for integrity verification:")
+    print("1. MD5 (fastest, forensic standard)")
+    print("2. SHA-1 (forensic standard)")
+    print("3. SHA-256 (most secure)")
+
+    choice = input("\nEnter your choice (1-3, default: 1): ").strip()
+
+    algo_map = {
+        '1': 'md5',
+        'md5': 'md5',
+        '2': 'sha1',
+        'sha1': 'sha1',
+        '3': 'sha256',
+        'sha256': 'sha256',
+        '': 'md5',
+    }
+
+    algorithm = algo_map.get(choice.lower(), 'md5')
+    print(f"Using {algorithm.upper()} for hashing.")
+    return algorithm
+
+def compute_hash_raw_segments(segments, algorithm, logger):
+    """Compute hash across all segments of a raw image as if they were one file."""
+    logger.info(f"Computing {algorithm.upper()} hash across {len(segments)} segments...")
+    h = hashlib.new(algorithm)
+    chunk_size = 1024 * 1024
+    total_size = sum(os.path.getsize(s) for s in segments)
+    processed = 0
+
+    for segment in segments:
+        with open(segment, 'rb') as f:
+            while True:
+                data = f.read(chunk_size)
+                if not data:
+                    break
+                h.update(data)
+                processed += len(data)
+                print(f"\r[HASHING] {(processed/total_size)*100:.1f}% complete", end="")
+
+    result = h.hexdigest()
+    print(f"\n[+] Computed {algorithm.upper()}: {result}")
+    return result
+
+def open_raw_image(image_path, algorithm, logger):
+    """
+    Open a raw DD image.
+
+    Returns:
+        tuple: (img_info, base_name, image_size, image_hash, segments)
+    """
+    image_path = os.path.normpath(image_path)
+    base_path = os.path.dirname(image_path)
+    base_name = os.path.splitext(os.path.basename(image_path))[0]
+
+    # Check if this is a segmented raw image (.001, .002, ...)
+    segments = get_raw_segments(base_path, base_name, logger)
+    if segments:
+        logger.info(f"Found {len(segments)} raw segments for {base_name}")
+        img_info = RawSegmentImgInfo(segments)
+    else:
+        logger.info(f"Single raw image: {base_name}")
+        img_info = pytsk3.Img_Info(image_path)
+        segments = [image_path]
+
+    image_size = img_info.get_size()
+    logger.info(f"Image size: {image_size} bytes ({image_size/(1024**3):.2f} GB)")
+
+    image_hash = compute_hash_raw_segments(segments, algorithm, logger)
+
+    return img_info, base_name, image_size, image_hash, segments
 
 def get_filesystem(img_info, image_size, logger):
     """
@@ -710,13 +945,13 @@ def get_filesystem(img_info, image_size, logger):
         choice = input("\nUnrecognized filesystem. Carve from this offset to a file for analysis? (y/n, Default: 'n'): ")
         
         if choice.lower() == 'y':
-            # 1. Calculate the 'Maximum' possible carve size
+            # Calculate the 'Maximum' possible carve size
             max_safe_size = calculate_carve_size(offset, image_size, volume_info, logger)
             
             print(f"\nMaximum suggested carve size: {max_safe_size} bytes ({max_safe_size // 1024**2} MB)")
             user_size = input("How many bytes to carve? (Type 'all' or press Enter for maximum): ").strip().lower()
             
-            # 2. Determine the actual size to carve
+            # Determine the actual size to carve
             if user_size == 'all' or user_size == '':
                 carve_size = max_safe_size
             else:
@@ -855,78 +1090,123 @@ def main():
     Main function to execute the script.
     Handles command line input for the E01 image path and orchestrates the workflow.
     """
+    # Mode selection
+    mode = parse_input_mode()
+
+    # Live system path
+    if mode == 'live':
+        image_name = 'live_system'
+        logger = setup_logging(image_name)
+        logger.info("Running in live system mode")
+
+        try:
+            selected_browser = parse_browser_selection()
+            output_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "browser_history_exports")
+            all_history = process_live_system(selected_browser, logger)
+
+            if all_history:
+                export_history(all_history, output_dir, selected_browser, image_name)
+                logger.info("Successfully exported browser history")
+            else:
+                logger.warning("No browser history found.")
+        except Exception as e:
+            logger.error(f"Critical error: {str(e)}")
+            sys.exit(1)
+        return
+
+    # Image path (EWF or RAW)
     try:
         if len(sys.argv) > 1:
             image_path = sys.argv[1]
         else:
-            print("Please enter the path to the E01 segment of the EWF image file (E01).")
-            image_path = input("Image path: ").strip()
+            prompt = "Enter path to .E01 file: " if mode == 'ewf' else "Enter path to raw image (.dd/.raw/.img): "
+            image_path = input(prompt).strip()
         
-        # Validate path exists
         if not os.path.exists(image_path):
             print(f"Error: Image file not found: {image_path}")
-            exit(1)
+            sys.exit(1)
         
-        # Extract image name (remove extension like .E01, .E02, etc.)
+        # Extract image name — strip any known forensic extension
         image_name = os.path.basename(image_path)
-        image_name = re.sub(r'\.[Ee]\d+$', '', image_name)
-        
-        # Set up logging
+        image_name = re.sub(r'\.[Ee]\d+$', '', image_name)           # .E01, .e01
+        image_name = re.sub(r'\.(dd|raw|img)$', '', image_name, flags=re.IGNORECASE)
+        image_name = re.sub(r'\.\d{3}$', '', image_name)  # .001, .002, etc.
+
         logger = setup_logging(image_name)
-        logger.info(f"Processing image: {image_path}")
+        logger.info(f"Processing image: {image_path} (mode: {mode})")
         
     except KeyboardInterrupt:
         print("\nProgram interrupted by user.")
-        exit(0)
+        sys.exit(0)
     except Exception as e:
         print(f"Error initializing program: {e}")
-        exit(1)
-    
+        sys.exit(1)
+
     ewf_handle = None
     initial_hash = None
+    filenames = None
+    raw_segments = None
+    raw_img_info = None 
+    analysis_complete = False
 
     try:
-        # Asks for input on browser selection
         selected_browser = parse_browser_selection()
-    
-        # Set output directory for exports
         output_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "browser_history_exports")
-        
-        # Open disk image
-        ewf_handle, img_info, image_name, total_image_size, initial_hash, filenames = open_disk_image(image_path, logger)
-        # Get filesystem information
-        # We pass the image_size and volume_table so the carver can use them if FS_Info fails
+
+        # Open image
+        if mode == 'ewf':
+            ewf_handle, img_info, image_name, total_image_size, initial_hash, filenames = open_ewf_image(image_path, logger)
+        else: #raw
+            hash_algorithm = parse_hash_algorithm()
+            img_info, image_name, total_image_size, initial_hash, raw_segments = open_raw_image(image_path, hash_algorithm, logger)
+            raw_img_info = img_info
+
+        # Filesystem & extraction 
         fs_info = get_filesystem(img_info, total_image_size, logger)
         if fs_info is None:
+            initial_hash = None  # prevent validation on clean exit
             return
-        
-        # Process user profiles and collect browser history
+
         all_history = process_user_profiles(fs_info, selected_browser, logger)
-        
-        # Export the collected history
+
         if all_history:
             export_history(all_history, output_dir, selected_browser, image_name)
             logger.info("Successfully exported browser history")
         else:
             logger.warning("No browser history found to export.")
-                
+
+        analysis_complete = True
     except Exception as e:
         logger.error(f"Critical error: {str(e)}")
         sys.exit(1)
+
     finally:
-            # Ensure EWF is closed
-            if ewf_handle is not None and initial_hash is not None:
-                logger.info("Performing final integrity validation...")
+        # Validate first, then close
+        if initial_hash is not None and analysis_complete:
+            logger.info("Performing final integrity validation...")
+            if mode == 'ewf' and ewf_handle is not None:
                 embedded_md5, embedded_sha1 = extract_ewf_hashes(filenames, logger)
                 final_hash = embedded_md5 or embedded_sha1
                 if final_hash is None:
                     ewf_handle.seek(0)
                     final_hash = compute_hash_by_algorithm(ewf_handle, detect_algorithm(initial_hash) or 'sha256', logger)
-                if initial_hash == final_hash:
-                    logger.info("VALIDATION SUCCESS: Image unchanged during analysis.")
-                else:
-                    logger.critical("VALIDATION FAILED: Hash mismatch!")
-                ewf_handle.close()
+            elif mode == 'raw' and raw_segments is not None:
+                final_hash = compute_hash_raw_segments(raw_segments, detect_algorithm(initial_hash) or 'sha256', logger)
+            else:
+                final_hash = None
+
+            if final_hash is None:
+                logger.warning("Could not perform final integrity check.")
+            elif initial_hash == final_hash:
+                logger.info("VALIDATION SUCCESS: Image unchanged during analysis.")
+            else:
+                logger.critical("VALIDATION FAILED: Hash mismatch! Image may have been modified.")
+
+        # Always close handles
+        if ewf_handle is not None:
+            ewf_handle.close()
+        if raw_img_info is not None:
+            raw_img_info.close()
 
 if __name__ == "__main__":
     main()
